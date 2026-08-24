@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000">
+<title>TraceCam</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+#app{height:100%;display:flex;flex-direction:column;background:#000;color:#fff}
+#stage{position:relative;flex:1;overflow:hidden;background:#000;touch-action:none}
+video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#overlay{position:absolute;left:50%;top:50%;width:60%;transform:translate(-50%,-50%);display:none;transform-origin:center;touch-action:none;user-select:none}
+#overlay img{width:100%;display:block;pointer-events:none}
+#empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#aaa;padding:30px;font-size:17px}
+#toolbar{background:rgba(18,18,18,.96);padding:10px 12px calc(10px + env(safe-area-inset-bottom));border-top:1px solid #333}
+.row{display:flex;gap:8px;align-items:center;margin-bottom:8px}.row:last-child{margin-bottom:0}
+button{border:0;border-radius:12px;background:#292929;color:#fff;min-height:44px;padding:0 14px;font-size:15px}
+button.primary{background:#fff;color:#000;font-weight:600}.active{background:#444!important}
+label{font-size:13px;color:#bbb;min-width:76px}input[type=range]{flex:1}
+#opacityVal{width:42px;text-align:right;font-variant-numeric:tabular-nums}.small{flex:1}#file{display:none}
+</style>
+</head>
+<body>
+<div id="app">
+<div id="stage">
+<video id="camera" autoplay playsinline muted></video>
+<div id="empty">Kamera wird gestartet…<br><br>Wähle anschließend ein Referenzbild.</div>
+<div id="overlay"><img id="ref" alt="Referenz"></div>
+</div>
+<div id="toolbar">
+<div class="row">
+<button id="choose" class="primary small">🖼️ Bild auswählen</button>
+<button id="mirror" class="small">↔︎ Spiegeln</button>
+<button id="flash" class="small">🔦 Licht</button>
+<input id="file" type="file" accept="image/*">
+</div>
+<div class="row">
+<label>Transparenz</label>
+<input id="opacity" type="range" min=".05" max="1" value=".5" step=".01">
+<span id="opacityVal">50%</span>
+</div>
+<div class="row">
+<button id="zoomOut">−</button><button id="zoomIn">＋</button>
+<button id="rotate">↻ Drehen</button><button id="lock">🔓 Sperren</button>
+</div>
+</div></div>
+<script>
+const video=document.getElementById('camera'),stage=document.getElementById('stage');
+const overlay=document.getElementById('overlay'),ref=document.getElementById('ref');
+const empty=document.getElementById('empty'),file=document.getElementById('file');
+const opacity=document.getElementById('opacity'),opacityVal=document.getElementById('opacityVal');
+const lockBtn=document.getElementById('lock'),mirrorBtn=document.getElementById('mirror'),flashBtn=document.getElementById('flash');
+let stream=null,track=null,locked=false,mirrored=false;
+let state={x:0,y:0,scale:1,rot:0},gesture={active:false};
+async function startCamera(){
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+  video.srcObject=stream;track=stream.getVideoTracks()[0];empty.style.display='none';
+ }catch(e){empty.innerHTML='Kamerazugriff wurde nicht erlaubt.<br><br>Bitte die Kamera-Berechtigung für diese Website aktivieren.';}
+}
+function render(){
+ const sx=state.scale*(mirrored?-1:1);
+ overlay.style.transform=`translate(calc(-50% + ${state.x}px),calc(-50% + ${state.y}px)) scale(${sx},${state.scale}) rotate(${state.rot}deg)`;
+ overlay.style.opacity=opacity.value;
+}
+function dist(a,b){return Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)}
+function ang(a,b){return Math.atan2(b.clientY-a.clientY,b.clientX-a.clientX)*180/Math.PI}
+file.onchange=()=>{
+ const f=file.files[0];if(!f)return;
+ ref.src=URL.createObjectURL(f);overlay.style.display='block';
+ state={x:0,y:0,scale:1,rot:0};mirrored=false;mirrorBtn.classList.remove('active');render();
+};
+choose.onclick=()=>file.click();
+opacity.oninput=()=>{opacityVal.textContent=Math.round(opacity.value*100)+'%';render()};
+zoomIn.onclick=()=>{state.scale=Math.min(5,state.scale*1.15);render()};
+zoomOut.onclick=()=>{state.scale=Math.max(.1,state.scale/1.15);render()};
+rotate.onclick=()=>{state.rot=(state.rot+15)%360;render()};
+mirrorBtn.onclick=()=>{mirrored=!mirrored;mirrorBtn.classList.toggle('active',mirrored);render()};
+lockBtn.onclick=()=>{locked=!locked;lockBtn.textContent=locked?'🔒 Entsperren':'🔓 Sperren';overlay.style.pointerEvents=locked?'none':'auto'};
+stage.addEventListener('touchstart',e=>{
+ if(locked||overlay.style.display==='none')return;
+ if(e.touches.length===1){let t=e.touches[0];gesture={active:true,type:1,x:t.clientX,y:t.clientY,base:{...state}}}
+ else if(e.touches.length===2){let[a,b]=e.touches;gesture={active:true,type:2,d:dist(a,b),a:ang(a,b),base:{...state}}}
+},{passive:false});
+stage.addEventListener('touchmove',e=>{
+ if(locked||!gesture.active)return;e.preventDefault();
+ if(e.touches.length===1&&gesture.type===1){let t=e.touches[0];state.x=gesture.base.x+t.clientX-gesture.x;state.y=gesture.base.y+t.clientY-gesture.y}
+ else if(e.touches.length===2){let[a,b]=e.touches;state.scale=Math.max(.1,Math.min(5,gesture.base.scale*dist(a,b)/gesture.d));state.rot=gesture.base.rot+ang(a,b)-gesture.a}
+ render();
+},{passive:false});
+stage.addEventListener('touchend',()=>gesture.active=false);
+flashBtn.onclick=async()=>{
+ if(!track)return;
+ try{let c=track.getCapabilities?.();if(c?.torch){let on=track.getSettings().torch===true;await track.applyConstraints({advanced:[{torch:!on}]});flashBtn.classList.toggle('active',!on)}
+ else alert('Das Kameralicht wird von diesem Browser nicht unterstützt.')}catch(e){alert('Das Kameralicht kann hier nicht direkt gesteuert werden.')}
+};
+if('wakeLock'in navigator){let w=null;async function keep(){try{w=await navigator.wakeLock.request('screen')}catch(e){}}document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')keep()});keep()}
+startCamera();
+</script>
+</body></html>
